@@ -6,6 +6,18 @@ const app = express();
 
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion } = require('mongodb');
+const cookieParser = require('cookie-parser');
+
+const corsOptions = {
+  origin: ['http://localhost:5173', 'https://carlink-sbr.netlify.app'],
+  credentials: true,
+  optionalSuccessStatus: 200,
+}
+// middleware
+app.use(cors(corsOptions));
+app.use(express.json());
+app.use(cookieParser())
+
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.o5v4c.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -19,10 +31,27 @@ const client = new MongoClient(uri, {
 });
 
 async function run() {
+  
+
   try {
+
+    const productsCollection = client.db('nexsyDB').collection('products')
+
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
     // Send a ping to confirm a successful connection
+    
+     // Save all products data in db
+     app.post('/products', async (req, res) => {
+      const productsData = req.body
+      const result = await productsCollection.insertOne(productsData)
+      res.send(result)
+    })
+    
+
+
+
+
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {

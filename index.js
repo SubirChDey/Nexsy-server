@@ -44,7 +44,7 @@ const verifyToken = (req, res, next) => {
 }
 
 async function run() {
-  
+
 
   try {
 
@@ -76,22 +76,28 @@ async function run() {
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
     // Send a ping to confirm a successful connection
-    
-     // Save all products data in db
-     app.post('/products', async (req, res) => {
+
+    // Save all products data in db
+    app.post('/products', async (req, res) => {
       const productsData = req.body
       const result = await productsCollection.insertOne(productsData)
       res.send(result)
-    })  
-    
-    
+    })
+
+    // users get api
+    app.get('/users', async (req, res) => {
+      const result = await userCollection.find().toArray();
+      res.send(result);
+    })
+
+
     // save users data
-    app.post('/users', async(req, res) => {
+    app.post('/users', async (req, res) => {
       const user = req.body;
-      const query = {email: user.email}
+      const query = { email: user.email }
       const existingUser = await userCollection.findOne(query);
-      if(existingUser) {
-        return res.send({message: 'user already exists', insertedId: null})
+      if (existingUser) {
+        return res.send({ message: 'user already exists', insertedId: null })
       }
       const result = await userCollection.insertOne(user);
       res.send(result);
@@ -110,11 +116,11 @@ async function run() {
 run().catch(console.dir);
 
 app.get('/', (req, res) => {
-    res.send('Nexsy Server')
-  })
-  
-  app.listen(port, () => {
-    console.log(`running on port ${port}`);
-  
-  })
+  res.send('Nexsy Server')
+})
+
+app.listen(port, () => {
+  console.log(`running on port ${port}`);
+
+})
 

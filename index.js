@@ -9,7 +9,7 @@ const { MongoClient, ServerApiVersion } = require('mongodb');
 const cookieParser = require('cookie-parser');
 
 const corsOptions = {
-  origin: ['http://localhost:5173', 'https://carlink-sbr.netlify.app'],
+  origin: ['http://localhost:5173'],
   credentials: true,
   optionalSuccessStatus: 200,
 }
@@ -30,12 +30,48 @@ const client = new MongoClient(uri, {
   }
 });
 
+const verifyToken = (req, res, next) => {
+  const token = req.cookies?.token;
+  if (!token) return res.status(401).send({ message: 'unauthorized access' });
+
+  jwt.verify(token, process.env.SECRET_KEY, (err, decoded) => {
+    if (err) {
+      return res.status(401).send({ message: 'unauthorized access' });
+    }
+    req.user = decoded;
+    next();
+  });
+}
+
 async function run() {
   
 
   try {
 
     const productsCollection = client.db('nexsyDB').collection('products')
+    const userCollection = client.db('nexsyDB').collection('users')
+
+
+    // Generate JWT
+    app.post('/jwt', async (req, res) => {
+      const email = req.body
+      const token = jwt.sign(email, process.env.SECRET_KEY, { expiresIn: '24h', })
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
+      }).send({ success: true })
+    })
+
+    // logout, clear cookie from browser
+    app.get('/logout', async (req, res) => {
+      res.clearCookie('token', {
+        maxAge: 0,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
+      })
+        .send({ success: true })
+    })
 
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
@@ -46,8 +82,15 @@ async function run() {
       const productsData = req.body
       const result = await productsCollection.insertOne(productsData)
       res.send(result)
-    })
+    })  
     
+    
+    // save users data
+    app.post('/users', async(req, res) => {
+      const user = req.body;
+      const result = await userCollection.insertOne(user);
+      res.send(result);
+    })
 
 
 

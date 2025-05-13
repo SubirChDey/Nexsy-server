@@ -78,6 +78,22 @@ async function run() {
     // await client.connect();
     // Send a ping to confirm a successful connection
 
+    // get my products
+    app.get('/products', async (req, res) => {
+      const email = req.query.email;
+      const query = {ownerEmail: email}
+      const result = await productsCollection.find(query).toArray();
+      res.send(result)
+    })
+
+    app.delete('/products/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await productsCollection.deleteOne(query);
+      res.send(result);
+    });
+
+
     // Save all products data in db
     app.post('/products', async (req, res) => {
       const productsData = req.body

@@ -50,6 +50,7 @@ async function run() {
 
     const productsCollection = client.db('nexsyDB').collection('products')
     const userCollection = client.db('nexsyDB').collection('users')
+    const couponsCollection = client.db('nexsyDB').collection('coupons')
 
 
     // Generate JWT
@@ -100,10 +101,10 @@ async function run() {
 
     // get current user data to show menu conditionally
     app.get("/users/:email", async (req, res) => {
-    const email = req.params.email;
-    const user = await userCollection.findOne({ email });
-    res.send(user);
-});
+      const email = req.params.email;
+      const user = await userCollection.findOne({ email });
+      res.send(user);
+    });
 
     // Role update
     app.patch("/users/:id", async (req, res) => {
@@ -139,6 +140,70 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     })
+
+
+    // Get coupons
+    app.get('/api/coupons', async (req, res) => {
+      try {
+        const coupons = await couponsCollection.find().sort({ createdAt: -1 }).toArray();
+        res.json(coupons);
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+
+
+    // Add new coupons
+    app.post('/api/coupons', async (req, res) => {
+      const { code, expiryDate, description, discount } = req.body;
+      try {
+        const result = await couponsCollection.insertOne({
+          code,
+          expiryDate: new Date(expiryDate),
+          description,
+          discount: Number(discount),
+          createdAt: new Date()
+        });
+        res.status(201).json({ insertedId: result.insertedId });
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+
+    // Update coupons
+    app.put('/api/coupons/:id', async (req, res) => {
+      const { id } = req.params;
+      const { code, expiryDate, description, discount } = req.body;
+      try {
+        const result = await couponsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              code,
+              expiryDate: new Date(expiryDate),
+              description,
+              discount: Number(discount)
+            }
+          }
+        );
+        res.json({ modifiedCount: result.modifiedCount });
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+
+
+    // Delete coupon
+    app.delete('/api/coupons/:id', async (req, res) => {
+      const { id } = req.params;
+      try {
+        const result = await couponsCollection.deleteOne({ _id: new ObjectId(id) });
+        res.json({ deletedCount: result.deletedCount });
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+
 
 
 

@@ -5,7 +5,7 @@ require('dotenv').config()
 const app = express();
 
 const port = process.env.PORT || 5000;
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const cookieParser = require('cookie-parser');
 
 const corsOptions = {
@@ -89,6 +89,43 @@ async function run() {
       const result = await userCollection.find().toArray();
       res.send(result);
     })
+
+    app.delete('/users/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) }
+      const result = await userCollection.deleteOne(query);
+      res.send(result);
+    })
+
+
+    // get current user data to show menu conditionally
+    app.get("/users/:email", async (req, res) => {
+    const email = req.params.email;
+    const user = await userCollection.findOne({ email });
+    res.send(user);
+});
+
+    // Role update
+    app.patch("/users/:id", async (req, res) => {
+      const userId = req.params.id;
+      const { role } = req.body;
+
+      try {
+        const result = await userCollection.updateOne(
+          { _id: new ObjectId(userId) },
+          { $set: { role: role } }
+        );
+
+        if (result.modifiedCount > 0) {
+          res.send({ success: true, message: "Role updated." });
+        } else {
+          res.status(404).send({ success: false, message: "No user updated." });
+        }
+      } catch (error) {
+        console.error("Error updating role:", error);
+        res.status(500).send({ success: false, message: "Internal server error." });
+      }
+    });
 
 
     // save users data

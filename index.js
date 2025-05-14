@@ -79,10 +79,17 @@ async function run() {
     // Send a ping to confirm a successful connection
 
     // get my products
-    app.get('/products', async (req, res) => {
+    app.get('/myProducts', async (req, res) => {
       const email = req.query.email;
-      const query = {ownerEmail: email}
+      const query = { ownerEmail: email }
       const result = await productsCollection.find(query).toArray();
+      res.send(result)
+    })
+
+
+    // get all products
+    app.get('/products', async (req, res) => {
+      const result = await productsCollection.find().toArray();
       res.send(result)
     })
 
@@ -100,6 +107,29 @@ async function run() {
       const result = await productsCollection.insertOne(productsData)
       res.send(result)
     })
+
+    // Status update
+    app.patch("/products/:id", async (req, res) => {
+      const productId = req.params.id;
+      const { status } = req.body;
+
+      try {
+        const result = await productsCollection.updateOne(
+          { _id: new ObjectId(productId) },
+          { $set: { status: status } }
+        );
+
+        if (result.modifiedCount > 0) {
+          res.send({ success: true, message: "Product status updated." });
+        } else {
+          res.status(404).send({ success: false, message: "No product updated." });
+        }
+      } catch (error) {
+        console.error("Error updating product status:", error);
+        res.status(500).send({ success: false, message: "Internal server error." });
+      }
+    });
+
 
     // users get api
     app.get('/users', async (req, res) => {
@@ -219,9 +249,6 @@ async function run() {
         res.status(500).json({ message: err.message });
       }
     });
-
-
-
 
 
     await client.db("admin").command({ ping: 1 });

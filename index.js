@@ -93,6 +93,38 @@ async function run() {
       res.send(result)
     })
 
+    app.get('/acceptedProducts', async (req, res) => {
+      const search = req.query.search || '';
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 6;
+
+      const query = {
+        status: 'Accepted',
+        ...(search && {
+          tags: { $elemMatch: { $regex: search, $options: 'i' } },
+        }),
+      };
+
+      try {
+        const totalCount = await productsCollection.countDocuments(query);
+        const totalPages = Math.ceil(totalCount / limit);
+
+        const products = await productsCollection
+          .find(query)
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .toArray();
+
+        res.send({ products, totalPages });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: 'Failed to fetch products' });
+      }
+    });
+
+
+
+
     app.delete('/products/:id', async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };

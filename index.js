@@ -149,6 +149,34 @@ async function run() {
       res.send({ success: result.modifiedCount > 0 });
     });
 
+    // report get route
+    app.get('/products/reported', async (req, res) => {
+      const reportedProducts = await productsCollection
+        .find({ reportedBy: { $exists: true, $not: { $size: 0 } } })
+        .toArray();
+      res.send(reportedProducts);
+    });
+
+    // reported product delete route
+    app.delete('/products/:id', async (req, res) => {
+      const id = req.params.id;
+      const result = await productsCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send(result);
+    });
+
+    // ignore reported product
+    app.patch('/products/ignore-report/:id', async (req, res) => {
+      const id = req.params.id;
+      const result = await productsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { reportedBy: [] } }
+      );
+      res.send(result);
+    });
+
+
+
+
     // reviews get
     app.get('/reviews', async (req, res) => {
       const productId = req.query.productId;
@@ -356,6 +384,31 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     })
+
+
+    // admin statistics page get route
+    app.get('/admin/statistics', async (req, res) => {
+      try {
+        const totalProducts = await productsCollection.countDocuments();
+        const acceptedProducts = await productsCollection.countDocuments({ status: 'accepted' });
+        const pendingProducts = await productsCollection.countDocuments({ status: 'pending' });
+
+        const totalUsers = await userCollection.countDocuments();
+        const totalReviews = await reviewsCollection.countDocuments();
+
+        res.send({
+          totalProducts,
+          acceptedProducts,
+          pendingProducts,
+          totalUsers,
+          totalReviews,
+        });
+      } catch (error) {
+        console.error('Statistics Error:', error);
+        res.status(500).send({ message: 'Failed to get admin statistics' });
+      }
+    });
+
 
 
     // Get coupons

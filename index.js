@@ -140,27 +140,36 @@ async function run() {
       res.send(result)
     })
 
-    // Status update
+    // Feature products
+    app.get('/featuredProducts', async (req, res) => {
+      const result = await productsCollection.find({ featured: true }).sort({ createdAt: -1 })
+        .limit(4)
+        .toArray()
+      res.send(result)
+    })
+
+    // Status or Featured update
     app.patch("/products/:id", async (req, res) => {
       const productId = req.params.id;
-      const { status } = req.body;
+      const updateFields = req.body;
 
       try {
         const result = await productsCollection.updateOne(
           { _id: new ObjectId(productId) },
-          { $set: { status: status } }
+          { $set: updateFields }
         );
 
         if (result.modifiedCount > 0) {
-          res.send({ success: true, message: "Product status updated." });
+          res.send({ success: true, message: "Product updated successfully." });
         } else {
           res.status(404).send({ success: false, message: "No product updated." });
         }
       } catch (error) {
-        console.error("Error updating product status:", error);
+        console.error("Error updating product:", error);
         res.status(500).send({ success: false, message: "Internal server error." });
       }
     });
+
 
 
     // users get api

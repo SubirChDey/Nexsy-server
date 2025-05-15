@@ -51,6 +51,7 @@ async function run() {
     const productsCollection = client.db('nexsyDB').collection('products')
     const userCollection = client.db('nexsyDB').collection('users')
     const couponsCollection = client.db('nexsyDB').collection('coupons')
+    const reviewsCollection = client.db('nexsyDB').collection('reviews')
 
 
     // Generate JWT
@@ -85,6 +86,86 @@ async function run() {
       const result = await productsCollection.find(query).toArray();
       res.send(result)
     })
+
+
+    // get specific product
+    app.get('/product/:id', async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const result = await productsCollection.findOne(filter);
+      res.send(result)
+    })
+
+    // upVote in productDetail page
+    app.patch('/products/upvote/:id', async (req, res) => {
+      const id = req.params.id;
+      const { email } = req.body;
+
+      const product = await productsCollection.findOne({ _id: new ObjectId(id) });
+
+      if (!product) {
+        return res.status(404).send({ error: 'Product not found' });
+      }
+
+      const alreadyVoted = product.votedEmails?.includes(email);
+      if (alreadyVoted) {
+        return res.send({ modifiedCount: 0 });
+      }
+
+      const result = await productsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $inc: { upVote: 1 },
+          $addToSet: { votedEmails: email },
+        }
+      );
+
+      res.send(result);
+    });
+
+    // post report button
+    app.post('/products/report/:id', async (req, res) => {
+      const id = req.params.id;
+      const { reporterEmail } = req.body;
+
+      const product = await productsCollection.findOne({ _id: new ObjectId(id) });
+
+      if (!product) {
+        return res.status(404).send({ success: false, message: 'Product not found' });
+      }
+
+      const alreadyReported = product.reportedBy?.includes(reporterEmail);
+      if (alreadyReported) {
+        return res.send({ success: false });
+      }
+
+      const result = await productsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $addToSet: { reportedBy: reporterEmail },
+        }
+      );
+
+      res.send({ success: result.modifiedCount > 0 });
+    });
+
+    // reviews get
+    app.get('/reviews', async (req, res) => {
+      const productId = req.query.productId;
+      const result = await reviewsCollection.find({ productId }).toArray();
+      res.send(result);
+    });
+
+
+    // Review post
+    app.post('/reviews', async (req, res) => {
+      const review = req.body;
+      const result = await reviewsCollection.insertOne(review);
+      res.send(result);
+    });
+
+
+
 
 
     // get all products
@@ -140,6 +221,14 @@ async function run() {
       res.send(result)
     })
 
+    // Trending products
+    app.get('/trendingProducts', async (req, res) => {
+      const result = await productsCollection.find().sort({ upVote: -1 })
+        .limit(6)
+        .toArray()
+      res.send(result)
+    })
+
     // Feature products
     app.get('/featuredProducts', async (req, res) => {
       const result = await productsCollection.find({ featured: true }).sort({ createdAt: -1 })
@@ -147,6 +236,46 @@ async function run() {
         .toArray()
       res.send(result)
     })
+
+    // upvote from feature section
+    app.patch("/products/upvote/:id", async (req, res) => {
+      try {
+        const productId = req.params.id;
+        const { userId } = req.body;
+
+        if (!ObjectId.isValid(productId)) {
+          return res.status(400).json({ error: "Invalid product ID" });
+        }
+
+        const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
+
+        if (!product) {
+          return res.status(404).json({ error: "Product not found" });
+        }
+
+        if (product.ownerId === userId) {
+          return res.status(403).json({ error: "Owner cannot vote on their own product" });
+        }
+
+        if ((product.voters || []).includes(userId)) {
+          return res.status(403).json({ error: "User has already voted" });
+        }
+
+        const updated = await db.collection("products").findOneAndUpdate(
+          { _id: new ObjectId(productId) },
+          {
+            $inc: { upVote: 1 },
+            $push: { voters: userId },
+          },
+          { returnDocument: "after" }
+        );
+
+        res.send({ success: true, upVote: updated.value.upVote });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Something went wrong" });
+      }
+    });
 
     // Status or Featured update
     app.patch("/products/:id", async (req, res) => {
@@ -236,6 +365,17 @@ async function run() {
         res.json(coupons);
       } catch (err) {
         res.status(500).json({ message: err.message });
+      }
+    });
+
+    // get coupon code for homepage
+    app.get('/api/couponCode', async (req, res) => {
+      try {
+        const coupons = await couponsCollection.find().sort({ expiryDate: 1 }).toArray();
+        res.send(coupons);
+      } catch (error) {
+        console.error("Error fetching coupons:", error);
+        res.status(500).send({ error: "Failed to fetch coupons" });
       }
     });
 

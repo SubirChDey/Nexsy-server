@@ -3,10 +3,14 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 require('dotenv').config()
 const app = express();
+// const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const Stripe = require("stripe");
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const cookieParser = require('cookie-parser');
+
 
 const corsOptions = {
   origin: ['http://localhost:5173'],
@@ -17,7 +21,6 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser())
-
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.o5v4c.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -31,17 +34,30 @@ const client = new MongoClient(uri, {
 });
 
 const verifyToken = (req, res, next) => {
+  console.log(req.headers.authorization)
   if (!req.headers.authorization) {
+
     return res.status(401).send({ message: 'unauthorized access' });
   }
   const token = req.headers.authorization.split(' ')[1];
-  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+  jwt.verify(token, process.env.SECRET_KEY, (err, decoded) => {
     if (err) {
       return res.status(401).send({ message: 'unauthorized access' })
     }
     req.decoded = decoded;
     next();
   })
+}
+
+const verifyAdmin = async (req, res, next) => {
+  const email = req.decoded.email;
+  const query = { email: email };
+  const user = await userCollection.findOne(query);
+  const isAdmin = user?.role === 'admin';
+  if (!isAdmin) {
+    return res.status(403).send({ message: 'forbidden access' });
+  }
+  next();
 }
 
 async function run() {
@@ -58,7 +74,7 @@ async function run() {
     app.post('/jwt', async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.SECRET_KEY, {
-        expiresIn: '30s'
+        expiresIn: '10h'
       });
       res.send({ token });
     })
@@ -78,8 +94,11 @@ async function run() {
     // Send a ping to confirm a successful connection
 
     // get my products
-    app.get('/myProducts', async (req, res) => {
+    app.get('/myProducts', verifyToken, async (req, res) => {
       const email = req.query.email;
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "unauthorized access" });
+      }
       const query = { ownerEmail: email }
       const result = await productsCollection.find(query).toArray();
       res.send(result)
@@ -355,7 +374,7 @@ async function run() {
       res.send(result);
     })
 
-    app.delete('/users/:id', verifyToken,  async (req, res) => {
+    app.delete('/users/:id', async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) }
       const result = await userCollection.deleteOne(query);
@@ -371,13 +390,13 @@ async function run() {
     });
 
     app.get('/users/role/:email', async (req, res) => {
-      const email = req.params.email;      
+      const email = req.params.email;
       const user = await userCollection.findOne({ email: email });
       res.json({ role: user.role });
     });
 
     // Role update
-    app.patch("/users/:id", verifyToken, async (req, res) => {
+    app.patch("/users/:id", async (req, res) => {
       const userId = req.params.id;
       const { role } = req.body;
 
@@ -400,7 +419,7 @@ async function run() {
 
 
     // save users data
-    app.post('/users', verifyToken, async (req, res) => {
+    app.post('/users', async (req, res) => {
       const user = req.body;
       const query = { email: user.email }
       const existingUser = await userCollection.findOne(query);
@@ -410,6 +429,14 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     })
+
+    // my profile for user route
+    app.get("/user/profile", verifyToken, async (req, res) => {
+      const email = req.query.email;
+      const query = { email };
+      const result = await userCollection.findOne(query);
+      res.send(result);
+    });
 
 
     // admin statistics page get route
@@ -438,7 +465,7 @@ async function run() {
 
 
     // Get coupons
-    app.get('/api/coupons', verifyToken, async (req, res) => {
+    app.get('/api/coupons', async (req, res) => {
       try {
         const coupons = await couponsCollection.find().sort({ createdAt: -1 }).toArray();
         res.json(coupons);
@@ -460,7 +487,7 @@ async function run() {
 
 
     // Add new coupons
-    app.post('/api/coupons', verifyToken, async (req, res) => {
+    app.post('/api/coupons', async (req, res) => {
       const { code, expiryDate, description, discount } = req.body;
       try {
         const result = await couponsCollection.insertOne({
@@ -477,7 +504,7 @@ async function run() {
     });
 
     // Update coupons
-    app.put('/api/coupons/:id', verifyToken, async (req, res) => {
+    app.put('/api/coupons/:id', async (req, res) => {
       const { id } = req.params;
       const { code, expiryDate, description, discount } = req.body;
       try {
@@ -500,13 +527,52 @@ async function run() {
 
 
     // Delete coupon
-    app.delete('/api/coupons/:id', verifyToken, async (req, res) => {
+    app.delete('/api/coupons/:id', async (req, res) => {
       const { id } = req.params;
       try {
         const result = await couponsCollection.deleteOne({ _id: new ObjectId(id) });
         res.json({ deletedCount: result.deletedCount });
       } catch (err) {
         res.status(500).json({ message: err.message });
+      }
+    });
+
+    // payments method      
+
+    app.post("/create-payment-intent", async (req, res) => {
+      const { amount, email, coupon } = req.body;
+      let finalAmount = amount;
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: finalAmount * 100,
+        currency: "usd",
+        metadata: { email, coupon },
+      });
+
+      res.send(paymentIntent.client_secret);
+    });
+
+// update subscription status
+    app.patch("/user/subscribe", async (req, res) => {
+      const email = req.query.email;
+
+      if (!email) {
+        return res.status(400).json({ error: "Email query is required" });
+      }
+
+      try {
+        const result = await userCollection.updateOne(
+          { email: email },
+          { $set: { isSubscribed: true } }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res.status(400).json({ error: "No changes made or user already subscribed" });
+        }
+
+        res.json({ message: "User subscription updated successfully" });
+      } catch (err) {
+        res.status(500).json({ error: "Failed to update subscription" });
       }
     });
 

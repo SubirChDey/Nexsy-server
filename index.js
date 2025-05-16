@@ -31,16 +31,17 @@ const client = new MongoClient(uri, {
 });
 
 const verifyToken = (req, res, next) => {
-  const token = req.cookies?.token;
-  if (!token) return res.status(401).send({ message: 'unauthorized access' });
-
-  jwt.verify(token, process.env.SECRET_KEY, (err, decoded) => {
+  if (!req.headers.authorization) {
+    return res.status(401).send({ message: 'unauthorized access' });
+  }
+  const token = req.headers.authorization.split(' ')[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
     if (err) {
-      return res.status(401).send({ message: 'unauthorized access' });
+      return res.status(401).send({ message: 'unauthorized access' })
     }
-    req.user = decoded;
+    req.decoded = decoded;
     next();
-  });
+  })
 }
 
 async function run() {
@@ -54,15 +55,12 @@ async function run() {
     const reviewsCollection = client.db('nexsyDB').collection('reviews')
 
 
-    // Generate JWT
     app.post('/jwt', async (req, res) => {
-      const email = req.body
-      const token = jwt.sign(email, process.env.SECRET_KEY, { expiresIn: '24h', })
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-      }).send({ success: true })
+      const user = req.body;
+      const token = jwt.sign(user, process.env.SECRET_KEY, {
+        expiresIn: '30s'
+      });
+      res.send({ token });
     })
 
     // logout, clear cookie from browser
@@ -98,421 +96,427 @@ async function run() {
 
 
     app.patch("/product/:id", async (req, res) => {
-  const updateFields = req.body;
+      const updateFields = req.body;
 
-  try {
-    const result = await productsCollection.updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $set: updateFields }
-    );
+      try {
+        const result = await productsCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: updateFields }
+        );
 
-    if (result.modifiedCount === 0) {
-      return res.status(400).json({ error: "No changes made" });
-    }
+        if (result.modifiedCount === 0) {
+          return res.status(400).json({ error: "No changes made" });
+        }
 
-    res.json({ message: "Product updated successfully" });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to update product" });
-  }
-});
-
-
-
-  // upVote in productDetail page
-  app.patch('/products/upvote/:id', async (req, res) => {
-    const id = req.params.id;
-    const { email } = req.body;
-
-    const product = await productsCollection.findOne({ _id: new ObjectId(id) });
-
-    if (!product) {
-      return res.status(404).send({ error: 'Product not found' });
-    }
-
-    const alreadyVoted = product.votedEmails?.includes(email);
-    if (alreadyVoted) {
-      return res.send({ modifiedCount: 0 });
-    }
-
-    const result = await productsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      {
-        $inc: { upVote: 1 },
-        $addToSet: { votedEmails: email },
+        res.json({ message: "Product updated successfully" });
+      } catch (err) {
+        res.status(500).json({ error: "Failed to update product" });
       }
-    );
-
-    res.send(result);
-  });
-
-  // post report button
-  app.post('/products/report/:id', async (req, res) => {
-    const id = req.params.id;
-    const { reporterEmail } = req.body;
-
-    const product = await productsCollection.findOne({ _id: new ObjectId(id) });
-
-    if (!product) {
-      return res.status(404).send({ success: false, message: 'Product not found' });
-    }
-
-    const alreadyReported = product.reportedBy?.includes(reporterEmail);
-    if (alreadyReported) {
-      return res.send({ success: false });
-    }
-
-    const result = await productsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      {
-        $addToSet: { reportedBy: reporterEmail },
-      }
-    );
-
-    res.send({ success: result.modifiedCount > 0 });
-  });
-
-  // report get route
-  app.get('/products/reported', async (req, res) => {
-    const reportedProducts = await productsCollection
-      .find({ reportedBy: { $exists: true, $not: { $size: 0 } } })
-      .toArray();
-    res.send(reportedProducts);
-  });
-
-  // reported product delete route
-  app.delete('/products/:id', async (req, res) => {
-    const id = req.params.id;
-    const result = await productsCollection.deleteOne({ _id: new ObjectId(id) });
-    res.send(result);
-  });
-
-  // ignore reported product
-  app.patch('/products/ignore-report/:id', async (req, res) => {
-    const id = req.params.id;
-    const result = await productsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { reportedBy: [] } }
-    );
-    res.send(result);
-  });
+    });
 
 
 
+    // upVote in productDetail page
+    app.patch('/products/upvote/:id', async (req, res) => {
+      const id = req.params.id;
+      const { email } = req.body;
 
-  // reviews get
-  app.get('/reviews', async (req, res) => {
-    const productId = req.query.productId;
-    const result = await reviewsCollection.find({ productId }).toArray();
-    res.send(result);
-  });
-
-
-  // Review post
-  app.post('/reviews', async (req, res) => {
-    const review = req.body;
-    const result = await reviewsCollection.insertOne(review);
-    res.send(result);
-  });
-
-
-
-
-
-  // get all products
-  app.get('/products', async (req, res) => {
-    const result = await productsCollection.find().toArray();
-    res.send(result)
-  })
-
-  app.get('/acceptedProducts', async (req, res) => {
-    const search = req.query.search || '';
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 6;
-
-    const query = {
-      status: 'Accepted',
-      ...(search && {
-        tags: { $elemMatch: { $regex: search, $options: 'i' } },
-      }),
-    };
-
-    try {
-      const totalCount = await productsCollection.countDocuments(query);
-      const totalPages = Math.ceil(totalCount / limit);
-
-      const products = await productsCollection
-        .find(query)
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .toArray();
-
-      res.send({ products, totalPages });
-    } catch (err) {
-      console.error(err);
-      res.status(500).send({ error: 'Failed to fetch products' });
-    }
-  });
-
-
-
-
-  app.delete('/products/:id', async (req, res) => {
-    const id = req.params.id;
-    const query = { _id: new ObjectId(id) };
-    const result = await productsCollection.deleteOne(query);
-    res.send(result);
-  });
-
-
-  // Save all products data in db
-  app.post('/products', async (req, res) => {
-    const productsData = req.body
-    const result = await productsCollection.insertOne(productsData)
-    res.send(result)
-  })
-
-  // Trending products
-  app.get('/trendingProducts', async (req, res) => {
-    const result = await productsCollection.find().sort({ upVote: -1 })
-      .limit(6)
-      .toArray()
-    res.send(result)
-  })
-
-  // Feature products
-  app.get('/featuredProducts', async (req, res) => {
-    const result = await productsCollection.find({ featured: true }).sort({ createdAt: -1 })
-      .limit(4)
-      .toArray()
-    res.send(result)
-  })
-
-  // upvote from feature section
-  app.patch("/products/upvote/:id", async (req, res) => {
-    try {
-      const productId = req.params.id;
-      const { userId } = req.body;
-
-      if (!ObjectId.isValid(productId)) {
-        return res.status(400).json({ error: "Invalid product ID" });
-      }
-
-      const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
+      const product = await productsCollection.findOne({ _id: new ObjectId(id) });
 
       if (!product) {
-        return res.status(404).json({ error: "Product not found" });
+        return res.status(404).send({ error: 'Product not found' });
       }
 
-      if (product.ownerId === userId) {
-        return res.status(403).json({ error: "Owner cannot vote on their own product" });
+      const alreadyVoted = product.votedEmails?.includes(email);
+      if (alreadyVoted) {
+        return res.send({ modifiedCount: 0 });
       }
 
-      if ((product.voters || []).includes(userId)) {
-        return res.status(403).json({ error: "User has already voted" });
-      }
-
-      const updated = await db.collection("products").findOneAndUpdate(
-        { _id: new ObjectId(productId) },
-        {
-          $inc: { upVote: 1 },
-          $push: { voters: userId },
-        },
-        { returnDocument: "after" }
-      );
-
-      res.send({ success: true, upVote: updated.value.upVote });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Something went wrong" });
-    }
-  });
-
-  // Status or Featured update
-  app.patch("/products/:id", async (req, res) => {
-    const productId = req.params.id;
-    const updateFields = req.body;
-
-    try {
       const result = await productsCollection.updateOne(
-        { _id: new ObjectId(productId) },
-        { $set: updateFields }
-      );
-
-      if (result.modifiedCount > 0) {
-        res.send({ success: true, message: "Product updated successfully." });
-      } else {
-        res.status(404).send({ success: false, message: "No product updated." });
-      }
-    } catch (error) {
-      console.error("Error updating product:", error);
-      res.status(500).send({ success: false, message: "Internal server error." });
-    }
-  });
-
-
-
-  // users get api
-  app.get('/users', async (req, res) => {
-    const result = await userCollection.find().toArray();
-    res.send(result);
-  })
-
-  app.delete('/users/:id', async (req, res) => {
-    const id = req.params.id;
-    const query = { _id: new ObjectId(id) }
-    const result = await userCollection.deleteOne(query);
-    res.send(result);
-  })
-
-
-  // get current user data to show menu conditionally
-  app.get("/users/:email", async (req, res) => {
-    const email = req.params.email;
-    const user = await userCollection.findOne({ email });
-    res.send(user);
-  });
-
-  // Role update
-  app.patch("/users/:id", async (req, res) => {
-    const userId = req.params.id;
-    const { role } = req.body;
-
-    try {
-      const result = await userCollection.updateOne(
-        { _id: new ObjectId(userId) },
-        { $set: { role: role } }
-      );
-
-      if (result.modifiedCount > 0) {
-        res.send({ success: true, message: "Role updated." });
-      } else {
-        res.status(404).send({ success: false, message: "No user updated." });
-      }
-    } catch (error) {
-      console.error("Error updating role:", error);
-      res.status(500).send({ success: false, message: "Internal server error." });
-    }
-  });
-
-
-  // save users data
-  app.post('/users', async (req, res) => {
-    const user = req.body;
-    const query = { email: user.email }
-    const existingUser = await userCollection.findOne(query);
-    if (existingUser) {
-      return res.send({ message: 'user already exists', insertedId: null })
-    }
-    const result = await userCollection.insertOne(user);
-    res.send(result);
-  })
-
-
-  // admin statistics page get route
-  app.get('/admin/statistics', async (req, res) => {
-    try {
-      const totalProducts = await productsCollection.countDocuments();
-      const acceptedProducts = await productsCollection.countDocuments({ status: 'accepted' });
-      const pendingProducts = await productsCollection.countDocuments({ status: 'pending' });
-
-      const totalUsers = await userCollection.countDocuments();
-      const totalReviews = await reviewsCollection.countDocuments();
-
-      res.send({
-        totalProducts,
-        acceptedProducts,
-        pendingProducts,
-        totalUsers,
-        totalReviews,
-      });
-    } catch (error) {
-      console.error('Statistics Error:', error);
-      res.status(500).send({ message: 'Failed to get admin statistics' });
-    }
-  });
-
-
-
-  // Get coupons
-  app.get('/api/coupons', async (req, res) => {
-    try {
-      const coupons = await couponsCollection.find().sort({ createdAt: -1 }).toArray();
-      res.json(coupons);
-    } catch (err) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  // get coupon code for homepage
-  app.get('/api/couponCode', async (req, res) => {
-    try {
-      const coupons = await couponsCollection.find().sort({ expiryDate: 1 }).toArray();
-      res.send(coupons);
-    } catch (error) {
-      console.error("Error fetching coupons:", error);
-      res.status(500).send({ error: "Failed to fetch coupons" });
-    }
-  });
-
-
-  // Add new coupons
-  app.post('/api/coupons', async (req, res) => {
-    const { code, expiryDate, description, discount } = req.body;
-    try {
-      const result = await couponsCollection.insertOne({
-        code,
-        expiryDate: new Date(expiryDate),
-        description,
-        discount: Number(discount),
-        createdAt: new Date()
-      });
-      res.status(201).json({ insertedId: result.insertedId });
-    } catch (err) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  // Update coupons
-  app.put('/api/coupons/:id', async (req, res) => {
-    const { id } = req.params;
-    const { code, expiryDate, description, discount } = req.body;
-    try {
-      const result = await couponsCollection.updateOne(
         { _id: new ObjectId(id) },
         {
-          $set: {
-            code,
-            expiryDate: new Date(expiryDate),
-            description,
-            discount: Number(discount)
-          }
+          $inc: { upVote: 1 },
+          $addToSet: { votedEmails: email },
         }
       );
-      res.json({ modifiedCount: result.modifiedCount });
-    } catch (err) {
-      res.status(500).json({ message: err.message });
-    }
-  });
+
+      res.send(result);
+    });
+
+    // post report button
+    app.post('/products/report/:id', async (req, res) => {
+      const id = req.params.id;
+      const { reporterEmail } = req.body;
+
+      const product = await productsCollection.findOne({ _id: new ObjectId(id) });
+
+      if (!product) {
+        return res.status(404).send({ success: false, message: 'Product not found' });
+      }
+
+      const alreadyReported = product.reportedBy?.includes(reporterEmail);
+      if (alreadyReported) {
+        return res.send({ success: false });
+      }
+
+      const result = await productsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $addToSet: { reportedBy: reporterEmail },
+        }
+      );
+
+      res.send({ success: result.modifiedCount > 0 });
+    });
+
+    // report get route
+    app.get('/products/reported', async (req, res) => {
+      const reportedProducts = await productsCollection
+        .find({ reportedBy: { $exists: true, $not: { $size: 0 } } })
+        .toArray();
+      res.send(reportedProducts);
+    });
+
+    // reported product delete route
+    app.delete('/products/:id', async (req, res) => {
+      const id = req.params.id;
+      const result = await productsCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send(result);
+    });
+
+    // ignore reported product
+    app.patch('/products/ignore-report/:id', async (req, res) => {
+      const id = req.params.id;
+      const result = await productsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { reportedBy: [] } }
+      );
+      res.send(result);
+    });
 
 
-  // Delete coupon
-  app.delete('/api/coupons/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-      const result = await couponsCollection.deleteOne({ _id: new ObjectId(id) });
-      res.json({ deletedCount: result.deletedCount });
-    } catch (err) {
-      res.status(500).json({ message: err.message });
-    }
-  });
 
 
-  await client.db("admin").command({ ping: 1 });
-  console.log("Pinged your deployment. You successfully connected to MongoDB!");
-} finally {
-  // Ensures that the client will close when you finish/error
-  // await client.close();
-}
+    // reviews get
+    app.get('/reviews', async (req, res) => {
+      const productId = req.query.productId;
+      const result = await reviewsCollection.find({ productId }).toArray();
+      res.send(result);
+    });
+
+
+    // Review post
+    app.post('/reviews', async (req, res) => {
+      const review = req.body;
+      const result = await reviewsCollection.insertOne(review);
+      res.send(result);
+    });
+
+
+
+
+
+    // get all products
+    app.get('/products', async (req, res) => {
+      const result = await productsCollection.find().toArray();
+      res.send(result)
+    })
+
+    app.get('/acceptedProducts', async (req, res) => {
+      const search = req.query.search || '';
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 6;
+
+      const query = {
+        status: 'Accepted',
+        ...(search && {
+          tags: { $elemMatch: { $regex: search, $options: 'i' } },
+        }),
+      };
+
+      try {
+        const totalCount = await productsCollection.countDocuments(query);
+        const totalPages = Math.ceil(totalCount / limit);
+
+        const products = await productsCollection
+          .find(query)
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .toArray();
+
+        res.send({ products, totalPages });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: 'Failed to fetch products' });
+      }
+    });
+
+
+
+
+    app.delete('/products/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await productsCollection.deleteOne(query);
+      res.send(result);
+    });
+
+
+    // Save all products data in db
+    app.post('/products', async (req, res) => {
+      const productsData = req.body
+      const result = await productsCollection.insertOne(productsData)
+      res.send(result)
+    })
+
+    // Trending products
+    app.get('/trendingProducts', async (req, res) => {
+      const result = await productsCollection.find().sort({ upVote: -1 })
+        .limit(6)
+        .toArray()
+      res.send(result)
+    })
+
+    // Feature products
+    app.get('/featuredProducts', async (req, res) => {
+      const result = await productsCollection.find({ featured: true }).sort({ createdAt: -1 })
+        .limit(4)
+        .toArray()
+      res.send(result)
+    })
+
+    // upvote from feature section
+    app.patch("/products/upvote/:id", async (req, res) => {
+      try {
+        const productId = req.params.id;
+        const { userId } = req.body;
+
+        if (!ObjectId.isValid(productId)) {
+          return res.status(400).json({ error: "Invalid product ID" });
+        }
+
+        const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
+
+        if (!product) {
+          return res.status(404).json({ error: "Product not found" });
+        }
+
+        if (product.ownerId === userId) {
+          return res.status(403).json({ error: "Owner cannot vote on their own product" });
+        }
+
+        if ((product.voters || []).includes(userId)) {
+          return res.status(403).json({ error: "User has already voted" });
+        }
+
+        const updated = await productsCollection.findOneAndUpdate(
+          { _id: new ObjectId(productId) },
+          {
+            $inc: { upVote: 1 },
+            $push: { voters: userId },
+          },
+          { returnDocument: "after" }
+        );
+
+        res.send({ success: true, upVote: updated.value.upVote });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Something went wrong" });
+      }
+    });
+
+    // Status or Featured update
+    app.patch("/products/:id", async (req, res) => {
+      const productId = req.params.id;
+      const updateFields = req.body;
+
+      try {
+        const result = await productsCollection.updateOne(
+          { _id: new ObjectId(productId) },
+          { $set: updateFields }
+        );
+
+        if (result.modifiedCount > 0) {
+          res.send({ success: true, message: "Product updated successfully." });
+        } else {
+          res.status(404).send({ success: false, message: "No product updated." });
+        }
+      } catch (error) {
+        console.error("Error updating product:", error);
+        res.status(500).send({ success: false, message: "Internal server error." });
+      }
+    });
+
+
+
+    // users get api
+    app.get('/users', verifyToken, async (req, res) => {
+      const result = await userCollection.find().toArray();
+      res.send(result);
+    })
+
+    app.delete('/users/:id', verifyToken,  async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) }
+      const result = await userCollection.deleteOne(query);
+      res.send(result);
+    })
+
+
+    // get current user data to show menu conditionally,
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email;
+      const user = await userCollection.findOne({ email });
+      res.send(user);
+    });
+
+    app.get('/users/role/:email', async (req, res) => {
+      const email = req.params.email;      
+      const user = await userCollection.findOne({ email: email });
+      res.json({ role: user.role });
+    });
+
+    // Role update
+    app.patch("/users/:id", verifyToken, async (req, res) => {
+      const userId = req.params.id;
+      const { role } = req.body;
+
+      try {
+        const result = await userCollection.updateOne(
+          { _id: new ObjectId(userId) },
+          { $set: { role: role } }
+        );
+
+        if (result.modifiedCount > 0) {
+          res.send({ success: true, message: "Role updated." });
+        } else {
+          res.status(404).send({ success: false, message: "No user updated." });
+        }
+      } catch (error) {
+        console.error("Error updating role:", error);
+        res.status(500).send({ success: false, message: "Internal server error." });
+      }
+    });
+
+
+    // save users data
+    app.post('/users', verifyToken, async (req, res) => {
+      const user = req.body;
+      const query = { email: user.email }
+      const existingUser = await userCollection.findOne(query);
+      if (existingUser) {
+        return res.send({ message: 'user already exists', insertedId: null })
+      }
+      const result = await userCollection.insertOne(user);
+      res.send(result);
+    })
+
+
+    // admin statistics page get route
+    app.get('/admin/statistics', verifyToken, async (req, res) => {
+      try {
+        const totalProducts = await productsCollection.countDocuments();
+        const acceptedProducts = await productsCollection.countDocuments({ status: 'accepted' });
+        const pendingProducts = await productsCollection.countDocuments({ status: 'pending' });
+
+        const totalUsers = await userCollection.countDocuments();
+        const totalReviews = await reviewsCollection.countDocuments();
+
+        res.send({
+          totalProducts,
+          acceptedProducts,
+          pendingProducts,
+          totalUsers,
+          totalReviews,
+        });
+      } catch (error) {
+        console.error('Statistics Error:', error);
+        res.status(500).send({ message: 'Failed to get admin statistics' });
+      }
+    });
+
+
+
+    // Get coupons
+    app.get('/api/coupons', verifyToken, async (req, res) => {
+      try {
+        const coupons = await couponsCollection.find().sort({ createdAt: -1 }).toArray();
+        res.json(coupons);
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+
+    // get coupon code for homepage
+    app.get('/api/couponCode', async (req, res) => {
+      try {
+        const coupons = await couponsCollection.find().sort({ expiryDate: 1 }).toArray();
+        res.send(coupons);
+      } catch (error) {
+        console.error("Error fetching coupons:", error);
+        res.status(500).send({ error: "Failed to fetch coupons" });
+      }
+    });
+
+
+    // Add new coupons
+    app.post('/api/coupons', verifyToken, async (req, res) => {
+      const { code, expiryDate, description, discount } = req.body;
+      try {
+        const result = await couponsCollection.insertOne({
+          code,
+          expiryDate: new Date(expiryDate),
+          description,
+          discount: Number(discount),
+          createdAt: new Date()
+        });
+        res.status(201).json({ insertedId: result.insertedId });
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+
+    // Update coupons
+    app.put('/api/coupons/:id', verifyToken, async (req, res) => {
+      const { id } = req.params;
+      const { code, expiryDate, description, discount } = req.body;
+      try {
+        const result = await couponsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              code,
+              expiryDate: new Date(expiryDate),
+              description,
+              discount: Number(discount)
+            }
+          }
+        );
+        res.json({ modifiedCount: result.modifiedCount });
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+
+
+    // Delete coupon
+    app.delete('/api/coupons/:id', verifyToken, async (req, res) => {
+      const { id } = req.params;
+      try {
+        const result = await couponsCollection.deleteOne({ _id: new ObjectId(id) });
+        res.json({ deletedCount: result.deletedCount });
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+
+
+    await client.db("admin").command({ ping: 1 });
+    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+  } finally {
+    // Ensures that the client will close when you finish/error
+    // await client.close();
+  }
 }
 run().catch(console.dir);
 

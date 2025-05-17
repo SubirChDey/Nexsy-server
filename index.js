@@ -34,7 +34,6 @@ const client = new MongoClient(uri, {
 });
 
 const verifyToken = (req, res, next) => {
-  console.log(req.headers.authorization)
   if (!req.headers.authorization) {
 
     return res.status(401).send({ message: 'unauthorized access' });
@@ -49,16 +48,20 @@ const verifyToken = (req, res, next) => {
   })
 }
 
-const verifyAdmin = async (req, res, next) => {
-  const email = req.decoded.email;
-  const query = { email: email };
-  const user = await userCollection.findOne(query);
-  const isAdmin = user?.role === 'admin';
-  if (!isAdmin) {
-    return res.status(403).send({ message: 'forbidden access' });
-  }
-  next();
-}
+// const verifyRole = (role) => {
+//   return async (req, res, next) => {
+//     const email = req.decoded.email;
+//     const query = { email: email };
+//     const user = await userCollection.findOne(query);
+
+//     if (!role.includes(user.role)) {
+//       return res
+//         .status(403)
+//         .send({ message: "forbidden: you are not authorized" });
+//     }
+//     next();
+//   };
+// };
 
 async function run() {
 
@@ -79,19 +82,35 @@ async function run() {
       res.send({ token });
     })
 
-    // logout, clear cookie from browser
-    app.get('/logout', async (req, res) => {
-      res.clearCookie('token', {
-        maxAge: 0,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-      })
-        .send({ success: true })
-    })
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      console.log(user);
+      const isAdmin = user?.role === 'admin';
+      if (!isAdmin) {
+        return res.status(403).send({ message: 'forbidden access' });
+      }
+      next();
+    }
+
+    const verifyModerator = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      const isModerator = user?.role === 'moderator';
+      if (!isModerator) {
+        return res.status(403).send({ message: 'forbidden access' });
+      }
+      next();
+    };
+
+
 
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
     // Send a ping to confirm a successful connection
+
 
     // get my products
     app.get('/myProducts', verifyToken, async (req, res) => {
@@ -106,7 +125,7 @@ async function run() {
 
 
     // get specific product
-    app.get('/product/:id', async (req, res) => {
+    app.get('/product/:id', verifyToken, async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
       const result = await productsCollection.findOne(filter);
@@ -136,31 +155,69 @@ async function run() {
 
 
     // upVote in productDetail page
+    // app.patch('/products/upvote/:id', async (req, res) => {
+    //   const id = req.params.id;
+    //   const { email } = req.body;
+
+    //   const product = await productsCollection.findOne({ _id: new ObjectId(id) });
+
+    //   if (!product) {
+    //     return res.status(404).send({ error: 'Product not found' });
+    //   }
+
+    //   const alreadyVoted = product.votedEmails?.includes(email);
+    //   if (alreadyVoted) {
+    //     return res.send({ modifiedCount: 0 });
+    //   }
+
+    //   const result = await productsCollection.updateOne(
+    //     { _id: new ObjectId(id) },
+    //     {
+    //       $inc: { upVote: 1 },
+    //       $addToSet: { votedEmails: email },
+    //     }
+    //   );
+
+    //   res.send(result);
+    // });
+
     app.patch('/products/upvote/:id', async (req, res) => {
-      const id = req.params.id;
-      const { email } = req.body;
+  const id = req.params.id;
+  const { email } = req.body;
 
-      const product = await productsCollection.findOne({ _id: new ObjectId(id) });
+  const product = await productsCollection.findOne({ _id: new ObjectId(id) });
 
-      if (!product) {
-        return res.status(404).send({ error: 'Product not found' });
+  if (!product) {
+    return res.status(404).send({ error: 'Product not found' });
+  }
+
+  const alreadyVoted = product.votedEmails?.includes(email);
+
+  let result;
+
+  if (alreadyVoted) {
+    // UNVOTE
+    result = await productsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $inc: { upVote: -1 },
+        $pull: { votedEmails: email },
       }
-
-      const alreadyVoted = product.votedEmails?.includes(email);
-      if (alreadyVoted) {
-        return res.send({ modifiedCount: 0 });
+    );
+    return res.send({ modifiedCount: result.modifiedCount, action: "unvoted" });
+  } else {
+    // VOTE
+    result = await productsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $inc: { upVote: 1 },
+        $addToSet: { votedEmails: email },
       }
+    );
+    return res.send({ modifiedCount: result.modifiedCount, action: "upvoted" });
+  }
+});
 
-      const result = await productsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $inc: { upVote: 1 },
-          $addToSet: { votedEmails: email },
-        }
-      );
-
-      res.send(result);
-    });
 
     // post report button
     app.post('/products/report/:id', async (req, res) => {
@@ -187,9 +244,10 @@ async function run() {
 
       res.send({ success: result.modifiedCount > 0 });
     });
+    
 
     // report get route
-    app.get('/products/reported', async (req, res) => {
+    app.get('/products/reported', verifyToken, verifyModerator, async (req, res) => {
       const reportedProducts = await productsCollection
         .find({ reportedBy: { $exists: true, $not: { $size: 0 } } })
         .toArray();
@@ -231,12 +289,8 @@ async function run() {
       res.send(result);
     });
 
-
-
-
-
     // get all products
-    app.get('/products', async (req, res) => {
+    app.get('/products', verifyToken, verifyModerator, async (req, res) => {
       const result = await productsCollection.find().toArray();
       res.send(result)
     })
@@ -305,47 +359,55 @@ async function run() {
     })
 
     // upvote from feature section
-    app.patch("/products/upvote/:id", async (req, res) => {
-      try {
-        const productId = req.params.id;
-        const { userId } = req.body;
 
-        if (!ObjectId.isValid(productId)) {
-          return res.status(400).json({ error: "Invalid product ID" });
-        }
+app.patch('/products/feature/upvote/:id', async (req, res) => {
+  try {
+    const productId = req.params.id;
+    const userEmail = req.body.email;
 
-        const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
+    if (!productId || !userEmail) {
+      return res.status(400).json({ error: "Missing product ID or email" });
+    }
 
-        if (!product) {
-          return res.status(404).json({ error: "Product not found" });
-        }
+    if (!ObjectId.isValid(productId)) {
+      return res.status(400).json({ error: "Invalid product ID" });
+    }
 
-        if (product.ownerId === userId) {
-          return res.status(403).json({ error: "Owner cannot vote on their own product" });
-        }
+    const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
 
-        if ((product.voters || []).includes(userId)) {
-          return res.status(403).json({ error: "User has already voted" });
-        }
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
 
-        const updated = await productsCollection.findOneAndUpdate(
-          { _id: new ObjectId(productId) },
-          {
-            $inc: { upVote: 1 },
-            $push: { voters: userId },
-          },
-          { returnDocument: "after" }
-        );
+    if ((product.votedEmails || []).includes(userEmail)) {
+      return res.status(403).json({ error: "User already voted" });
+    }
+    
+    const updateResult = await productsCollection.findOneAndUpdate(
+      { _id: new ObjectId(productId) },
+      {
+        $inc: { upVote: 1 },
+        $push: { votedEmails: userEmail },
+      },
+      { returnDocument: "after" }
+    );
 
-        res.send({ success: true, upVote: updated.value.upVote });
-      } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Something went wrong" });
-      }
-    });
+    if (!updateResult.value) {
+      return res.status(500).json({ error: "Failed to update product" });
+    }
+
+    res.status(200).json({ message: "Upvote successful", upVote: updateResult.value.upVote });
+  } catch (error) {
+    console.error("Upvote route error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+
 
     // Status or Featured update
-    app.patch("/products/:id", async (req, res) => {
+    app.patch("/products/:id", verifyToken, async (req, res) => {
       const productId = req.params.id;
       const updateFields = req.body;
 
@@ -369,7 +431,13 @@ async function run() {
 
 
     // users get api
-    app.get('/users', verifyToken, async (req, res) => {
+    app.get('/users', verifyToken, verifyAdmin, async (req, res) => {
+      const result = await userCollection.find().toArray();
+      res.send(result);
+    })
+
+    // users get api for add product page
+    app.get('/users/isSubscribed', verifyToken, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result);
     })
@@ -440,7 +508,7 @@ async function run() {
 
 
     // admin statistics page get route
-    app.get('/admin/statistics', verifyToken, async (req, res) => {
+    app.get('/admin/statistics', verifyToken, verifyAdmin, async (req, res) => {
       try {
         const totalProducts = await productsCollection.countDocuments();
         const acceptedProducts = await productsCollection.countDocuments({ status: 'accepted' });
@@ -465,7 +533,7 @@ async function run() {
 
 
     // Get coupons
-    app.get('/api/coupons', async (req, res) => {
+    app.get('/api/coupons', verifyToken, verifyAdmin, async (req, res) => {
       try {
         const coupons = await couponsCollection.find().sort({ createdAt: -1 }).toArray();
         res.json(coupons);

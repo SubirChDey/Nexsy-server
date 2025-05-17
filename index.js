@@ -13,7 +13,7 @@ const cookieParser = require('cookie-parser');
 
 
 const corsOptions = {
-  origin: ['http://localhost:5173'],
+  origin: ['http://localhost:5173', 'https://nexsy.netlify.app'],
   credentials: true,
   optionalSuccessStatus: 200,
 }
@@ -85,8 +85,7 @@ async function run() {
     const verifyAdmin = async (req, res, next) => {
       const email = req.decoded.email;
       const query = { email: email };
-      const user = await userCollection.findOne(query);
-      console.log(user);
+      const user = await userCollection.findOne(query);      
       const isAdmin = user?.role === 'admin';
       if (!isAdmin) {
         return res.status(403).send({ message: 'forbidden access' });
@@ -153,70 +152,41 @@ async function run() {
     });
 
 
-
-    // upVote in productDetail page
-    // app.patch('/products/upvote/:id', async (req, res) => {
-    //   const id = req.params.id;
-    //   const { email } = req.body;
-
-    //   const product = await productsCollection.findOne({ _id: new ObjectId(id) });
-
-    //   if (!product) {
-    //     return res.status(404).send({ error: 'Product not found' });
-    //   }
-
-    //   const alreadyVoted = product.votedEmails?.includes(email);
-    //   if (alreadyVoted) {
-    //     return res.send({ modifiedCount: 0 });
-    //   }
-
-    //   const result = await productsCollection.updateOne(
-    //     { _id: new ObjectId(id) },
-    //     {
-    //       $inc: { upVote: 1 },
-    //       $addToSet: { votedEmails: email },
-    //     }
-    //   );
-
-    //   res.send(result);
-    // });
-
+    // vote unvote trending, feature and product detail page
     app.patch('/products/upvote/:id', async (req, res) => {
-  const id = req.params.id;
-  const { email } = req.body;
+      const id = req.params.id;
+      const { email } = req.body;
 
-  const product = await productsCollection.findOne({ _id: new ObjectId(id) });
+      const product = await productsCollection.findOne({ _id: new ObjectId(id) });
 
-  if (!product) {
-    return res.status(404).send({ error: 'Product not found' });
-  }
-
-  const alreadyVoted = product.votedEmails?.includes(email);
-
-  let result;
-
-  if (alreadyVoted) {
-    // UNVOTE
-    result = await productsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      {
-        $inc: { upVote: -1 },
-        $pull: { votedEmails: email },
+      if (!product) {
+        return res.status(404).send({ error: 'Product not found' });
       }
-    );
-    return res.send({ modifiedCount: result.modifiedCount, action: "unvoted" });
-  } else {
-    // VOTE
-    result = await productsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      {
-        $inc: { upVote: 1 },
-        $addToSet: { votedEmails: email },
+
+      const alreadyVoted = product.votedEmails?.includes(email);
+
+      let result;
+
+      if (alreadyVoted) {        
+        result = await productsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $inc: { upVote: -1 },
+            $pull: { votedEmails: email },
+          }
+        );
+        return res.send({ modifiedCount: result.modifiedCount, action: "unvoted" });
+      } else {        
+        result = await productsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $inc: { upVote: 1 },
+            $addToSet: { votedEmails: email },
+          }
+        );
+        return res.send({ modifiedCount: result.modifiedCount, action: "upvoted" });
       }
-    );
-    return res.send({ modifiedCount: result.modifiedCount, action: "upvoted" });
-  }
-});
+    });
 
 
     // post report button
@@ -244,7 +214,7 @@ async function run() {
 
       res.send({ success: result.modifiedCount > 0 });
     });
-    
+
 
     // report get route
     app.get('/products/reported', verifyToken, verifyModerator, async (req, res) => {
@@ -360,48 +330,48 @@ async function run() {
 
     // upvote from feature section
 
-app.patch('/products/feature/upvote/:id', async (req, res) => {
-  try {
-    const productId = req.params.id;
-    const userEmail = req.body.email;
+    app.patch('/products/feature/upvote/:id', async (req, res) => {
+      try {
+        const productId = req.params.id;
+        const userEmail = req.body.email;
 
-    if (!productId || !userEmail) {
-      return res.status(400).json({ error: "Missing product ID or email" });
-    }
+        if (!productId || !userEmail) {
+          return res.status(400).json({ error: "Missing product ID or email" });
+        }
 
-    if (!ObjectId.isValid(productId)) {
-      return res.status(400).json({ error: "Invalid product ID" });
-    }
+        if (!ObjectId.isValid(productId)) {
+          return res.status(400).json({ error: "Invalid product ID" });
+        }
 
-    const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
+        const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
 
-    if (!product) {
-      return res.status(404).json({ error: "Product not found" });
-    }
+        if (!product) {
+          return res.status(404).json({ error: "Product not found" });
+        }
 
-    if ((product.votedEmails || []).includes(userEmail)) {
-      return res.status(403).json({ error: "User already voted" });
-    }
-    
-    const updateResult = await productsCollection.findOneAndUpdate(
-      { _id: new ObjectId(productId) },
-      {
-        $inc: { upVote: 1 },
-        $push: { votedEmails: userEmail },
-      },
-      { returnDocument: "after" }
-    );
+        if ((product.votedEmails || []).includes(userEmail)) {
+          return res.status(403).json({ error: "User already voted" });
+        }
 
-    if (!updateResult.value) {
-      return res.status(500).json({ error: "Failed to update product" });
-    }
+        const updateResult = await productsCollection.findOneAndUpdate(
+          { _id: new ObjectId(productId) },
+          {
+            $inc: { upVote: 1 },
+            $push: { votedEmails: userEmail },
+          },
+          { returnDocument: "after" }
+        );
 
-    res.status(200).json({ message: "Upvote successful", upVote: updateResult.value.upVote });
-  } catch (error) {
-    console.error("Upvote route error:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
+        if (!updateResult.value) {
+          return res.status(500).json({ error: "Failed to update product" });
+        }
+
+        res.status(200).json({ message: "Upvote successful", upVote: updateResult.value.upVote });
+      } catch (error) {
+        console.error("Upvote route error:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    });
 
 
 
@@ -533,7 +503,7 @@ app.patch('/products/feature/upvote/:id', async (req, res) => {
 
 
     // Get coupons
-    app.get('/api/coupons', verifyToken, verifyAdmin, async (req, res) => {
+    app.get('/api/coupons', async (req, res) => {
       try {
         const coupons = await couponsCollection.find().sort({ createdAt: -1 }).toArray();
         res.json(coupons);
@@ -657,8 +627,8 @@ app.patch('/products/feature/upvote/:id', async (req, res) => {
     });
 
 
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();

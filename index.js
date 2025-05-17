@@ -503,6 +503,18 @@ async function run() {
       }
     });
 
+    app.get('/coupons/validate', async (req, res) => {
+      const { code } = req.query;
+      const coupon = await couponsCollection.findOne({ code });
+      if (!coupon || new Date(coupon.expiryDate) < new Date()) {
+        return res.json({ valid: false });
+      }
+      res.json({ valid: true, discount: coupon.discount });
+
+    });
+
+
+
     // Update coupons
     app.put('/api/coupons/:id', async (req, res) => {
       const { id } = req.params;
@@ -552,7 +564,7 @@ async function run() {
       res.send(paymentIntent.client_secret);
     });
 
-// update subscription status
+    // update subscription status
     app.patch("/user/subscribe", async (req, res) => {
       const email = req.query.email;
 
